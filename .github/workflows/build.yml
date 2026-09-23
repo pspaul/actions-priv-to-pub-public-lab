@@ -3,17 +3,14 @@ run-name: private-build-${{ inputs.request_id }}
 on:
   workflow_dispatch:
     inputs:
-      source_sha:
-        description: Private commit SHA
-        required: true
       request_id:
         description: Correlation ID
         required: true
       private_run_id:
         description: Private dispatch run ID
         required: true
-      certificate_b64:
-        description: One-run encryption certificate
+      sealed_payload_b64:
+        description: Encrypted private build parameters
         required: true
 
 permissions:
@@ -25,17 +22,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch exact private commit
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.PRIVATE_REPO }}
-          ref: ${{ inputs.source_sha }}
-          token: ${{ secrets.PRIVATE_READ_TOKEN }}
-          persist-credentials: false
-          path: private
-      - name: Build and encrypt captured output
+      - name: Quiet private checkout, build, and encrypt
         env:
-          CERTIFICATE_B64: ${{ inputs.certificate_b64 }}
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+          PRIVATE_READ_TOKEN: ${{ secrets.PRIVATE_READ_TOKEN }}
+          DISPATCH_DECRYPT_KEY: ${{ secrets.DISPATCH_DECRYPT_KEY }}
+          INPUT_CERTIFICATE_B64: ${{ vars.INPUT_CERTIFICATE_B64 }}
+          SEALED_PAYLOAD_B64: ${{ inputs.sealed_payload_b64 }}
         run: bash scripts/build-and-encrypt.sh
       - name: Upload encrypted result only
         uses: actions/upload-artifact@v4
@@ -53,15 +46,14 @@ jobs:
       - name: Trigger private collection
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_CALLBACK_TOKEN }}
-          PRIVATE_REPO: ${{ vars.PRIVATE_REPO }}
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
           REQUEST_ID: ${{ inputs.request_id }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
           PRIVATE_RUN_ID: ${{ inputs.private_run_id }}
         run: |
           payload="$(mktemp)"
-          jq -n --arg id "$REQUEST_ID" --arg sha "$SOURCE_SHA" \
+          jq -n --arg id "$REQUEST_ID" \
             --arg private_run_id "$PRIVATE_RUN_ID" --arg public_run_id "$GITHUB_RUN_ID" \
-            '{ref:"main",inputs:{request_id:$id,source_sha:$sha,private_run_id:$private_run_id,public_run_id:$public_run_id}}' \
+            '{ref:"main",inputs:{request_id:$id,private_run_id:$private_run_id,public_run_id:$public_run_id}}' \
             > "$payload"
           gh api -X POST "repos/${PRIVATE_REPO}/actions/workflows/collect.yml/dispatches" \
             --input "$payload" >/dev/null
