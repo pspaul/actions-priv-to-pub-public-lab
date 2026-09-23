@@ -1,0 +1,69 @@
+name: Public builder
+run-name: private-build-${{ inputs.request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Private commit SHA
+        required: true
+      request_id:
+        description: Correlation ID
+        required: true
+      private_run_id:
+        description: Private dispatch run ID
+        required: true
+      certificate_b64:
+        description: One-run encryption certificate
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRIVATE_REPO }}
+          ref: ${{ inputs.source_sha }}
+          token: ${{ secrets.PRIVATE_READ_TOKEN }}
+          persist-credentials: false
+          path: private
+      - name: Build and encrypt captured output
+        env:
+          CERTIFICATE_B64: ${{ inputs.certificate_b64 }}
+        run: bash scripts/build-and-encrypt.sh
+      - name: Upload encrypted result only
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-result-${{ inputs.request_id }}
+          path: result.cms
+          if-no-files-found: error
+          retention-days: 1
+  callback:
+    if: always()
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger private collection
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_CALLBACK_TOKEN }}
+          PRIVATE_REPO: ${{ vars.PRIVATE_REPO }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PRIVATE_RUN_ID: ${{ inputs.private_run_id }}
+        run: |
+          payload="$(mktemp)"
+          jq -n --arg id "$REQUEST_ID" --arg sha "$SOURCE_SHA" \
+            --arg private_run_id "$PRIVATE_RUN_ID" --arg public_run_id "$GITHUB_RUN_ID" \
+            '{ref:"main",inputs:{request_id:$id,source_sha:$sha,private_run_id:$private_run_id,public_run_id:$public_run_id}}' \
+            > "$payload"
+          gh api -X POST "repos/${PRIVATE_REPO}/actions/workflows/collect.yml/dispatches" \
+            --input "$payload" >/dev/null
+          rm -f "$payload"
+          echo 'Private collection requested.'
