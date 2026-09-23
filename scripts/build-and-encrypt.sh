@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${PRIVATE_REPO:?}"
-: "${PRIVATE_READ_TOKEN:?}"
 : "${DISPATCH_DECRYPT_KEY:?}"
 : "${INPUT_CERTIFICATE_B64:?}"
 : "${SEALED_PAYLOAD_B64:?}"
@@ -21,6 +20,7 @@ rm -f "$work/input-key.pem"
 source_sha="$(jq -r .source_sha "$work/manifest.json")"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
 jq -r .return_certificate_b64 "$work/manifest.json" | base64 -d > "$work/return-cert.pem"
+: "${PRIVATE_READ_TOKEN:?Set PRIVATE_READ_TOKEN}"
 
 mkdir private
 git -C private init -q > "$work/build.log" 2>&1
