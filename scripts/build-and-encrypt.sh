@@ -17,6 +17,7 @@ if ! openssl cms -decrypt -binary -inform DER -in "$work/manifest.cms" \
   exit 1
 fi
 unset DISPATCH_DECRYPT_KEY
+rm -f "$work/input-key.pem"
 source_sha="$(jq -r .source_sha "$work/manifest.json")"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
 jq -r .return_certificate_b64 "$work/manifest.json" | base64 -d > "$work/return-cert.pem"
